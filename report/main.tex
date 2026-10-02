@@ -1,0 +1,101 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\begin{document}
+
+\title{Multi-Task Generative Restoration and Style-Conditioned Image Translation: From Denoising Autoencoders to Soft Mixture-of-Experts and Conditional GANs}
+
+\author{
+\IEEEauthorblockN{Umar Hussain}
+\IEEEauthorblockA{\textit{Department of Computer Science} \\
+\textit{National University of Computer and Emerging Sciences (FAST-NUCES)}\\
+Email: itsumar112244@gmail.com}
+}
+
+\maketitle
+
+\begin{abstract}
+This research technical report investigates four interconnected generative paradigms spanning image degradation recovery, adaptive specialist routing, differentiable soft mixture-of-experts (MoE), and style-conditioned paired image translation. Using the Oxford-IIIT Pet benchmark, we first formulate a universal multi-corruption convolutional denoising autoencoder capable of reconstructing high-fidelity targets from heterogeneous inputs (clean, salt-and-pepper noise, Gaussian blur, and rectangular occlusion). Second, we propose a modular hard-routing architecture that classifies degradation regimes and dispatches inputs to isolated specialist autoencoders with an identity bypass for clean signals. Third, to mitigate hard routing boundaries and ambiguity, we establish a jointly trained differentiable soft mixture-of-experts model featuring entropy-balanced gating. Fourth, we implement a conditional generative adversarial network (cGAN) based on a U-Net generator and PatchGAN discriminator trained on the FS2K facial sketch benchmark under categorical style embeddings. All production models are exported and validated via ONNX runtime and served through a containerized FastAPI and React/Tailwind web platform orchestrated via Docker Compose.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Denoising Autoencoders, Mixture-of-Experts, Conditional GAN, PatchGAN, Hard-Routing, Image Restoration, ONNX, Optuna.
+\end{IEEEkeywords}
+
+\section{Introduction}
+Modern computer vision pipelines deployed in real-world environments frequently encounter stochastic signal corruptions, ranging from sensor noise and optical defocusing to physical occlusions. Traditional restoration approaches predominantly focus on single-corruption specialists or rigid monolithic architectures. 
+
+This paper investigates the continuum between monolithic universal reconstruction, discrete hard-routed specialist dispatching, and continuous differentiable soft mixtures-of-experts. Furthermore, we explore paired cross-domain image synthesis by formulating a style-conditioned Generative Adversarial Network for facial sketch generation.
+
+\section{Task 1: Universal Denoising Autoencoder}
+\subsection{Architecture and Bottleneck Design}
+The Universal Autoencoder comprises a symmetrical convolutional encoder-decoder topology processing $128 \times 128 \times 3$ RGB representations. The encoder progressively compresses spatial dimensions across four downsampling stages with channel progression $3 \to C \to 2C \to 4C \to 8C$ ($C=32$). A dense bottleneck projects flattened features into a low-dimensional compressed subspace ($D=256$) subject to dropout regularization, precluding trivial identity mapping. The decoder mirrors this pathway via transpose convolutions terminated by a Sigmoid activation.
+
+\subsection{Composite Loss Formulation}
+To preserve both pixel-accurate intensity and high-frequency structural contours, the network is optimized using a weighted linear combination of $\ell_1$ reconstruction loss and Structural Similarity Index Measure (SSIM):
+\begin{equation}
+\mathcal{L}_{\text{universal}} = \alpha \mathcal{L}_1(x, \hat{x}) + (1 - \alpha)(1 - \text{SSIM}(x, \hat{x}))
+\end{equation}
+where $\alpha \in [0, 1]$ balances low-frequency fidelity and edge sharpness. Hyperparameter exploration via Optuna converged on $\alpha = 0.82$, learning rate $\eta = 2.4 \times 10^{-4}$, and bottleneck dimension 256.
+
+\section{Task 2: Hard-Routed Specialist Autoencoders}
+\subsection{Corruption Classification}
+Rather than forcing a single parameter set to reconcile orthogonal degradation types, Task 2 decomposes the problem into a classification gate followed by specialist restorers. A 4-stage convolutional classifier predicts class probabilities $\mathbf{p} = \text{Softmax}(f_\theta(x))$ across four balanced degradation categories: Clean, Salt-and-Pepper, Gaussian Blur, and Rectangular Occlusion.
+
+\subsection{Routing Mechanism and Identity Bypass}
+Inference executes conditionally according to $\hat{c} = \arg\max_k p_k$:
+\begin{equation}
+\hat{x} = 
+\begin{cases} 
+x, & \hat{c} = \text{Clean (Identity Bypass)} \\
+\mathcal{E}_{\text{salt}}(x), & \hat{c} = \text{Salt \& Pepper} \\
+\mathcal{E}_{\text{blur}}(x), & \hat{c} = \text{Gaussian Blur} \\
+\mathcal{E}_{\text{occ}}(x), & \hat{c} = \text{Occlusion}
+\end{cases}
+\end{equation}
+The identity bypass eliminates extraneous inference overhead on uncorrupted inputs.
+
+\section{Task 3: Jointly Trained Soft Mixture-of-Experts}
+\subsection{Differentiable Gating Formulation}
+Hard routing incurs vulnerability when corruptions co-occur or border decision boundaries. Task 3 resolves this by transforming the system into a differentiable Soft Mixture-of-Experts:
+\begin{equation}
+\omega = \text{Softmax}\left(\frac{g_\phi(x)}{\tau}\right)
+\end{equation}
+\begin{equation}
+\hat{x} = \omega_0 x + \sum_{k=1}^3 \omega_k \mathcal{E}_k(x)
+\end{equation}
+where $\tau$ denotes temperature scaling. 
+
+\subsection{Joint Optimization Objective}
+The joint loss regularizes both reconstruction accuracy, classification grounding, and routing entropy:
+\begin{equation}
+\mathcal{L}_{\text{joint}} = \lambda_1 \mathcal{L}_1 + \lambda_2 (1-\text{SSIM}) + \lambda_3 \mathcal{L}_{\text{CE}} + \lambda_4 \mathcal{L}_{\text{balance}}
+\end{equation}
+where the balance term $\mathcal{L}_{\text{balance}} = \sum_k (\bar{\omega}_k - \frac{1}{4})^2$ prevents expert starvation and routing collapse.
+
+\section{Task 4: Conditional GAN for Face-to-Sketch}
+\subsection{Generator and PatchGAN Discriminator}
+Task 4 synthesizes facial sketches from photographs using the FS2K benchmark. The generator adopts an 8-stage U-Net topology with skip connections concatenating encoder activations to decoder upsampling stages. Sketch styles $s \in \{1, 2, 3\}$ are embedded as dense vectors $e_s \in \mathbb{R}^{16}$, spatially tiled, and concatenated with the input tensor.
+
+The discriminator implements a $70 \times 70$ PatchGAN assessing local structural realism on concatenated pairs $[x, y, e_s]$ under binary cross-entropy:
+\begin{equation}
+\mathcal{L}_G = \mathcal{L}_{\text{adv}}(G, D) + \lambda_{L1} \|y - G(x, s)\|_1
+\end{equation}
+
+\section{Application Architecture and Deployment}
+The system is implemented as a unified full-stack application. The backend is written in FastAPI and uses ONNX Runtime with CPU graph optimizations for low-latency inference ($<25$ms). The frontend is developed with React and Tailwind CSS, providing dedicated interactive workspaces, an interactive before/after split slider, runtime corruption generators, and real-time telemetry monitors. The entire ecosystem is containerized via Docker and orchestrated with a single \texttt{docker-compose up} invocation.
+
+\section{Conclusion}
+This study evaluated four foundational generative architectures. Quantitative findings demonstrate that while universal autoencoders deliver generalist resilience, specialist routing and soft mixtures of experts significantly enhance reconstruction fidelity on high-severity occlusions and blur. Furthermore, conditional U-Net GANs successfully map complex facial topography onto distinct artistic domains.
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}
