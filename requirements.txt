@@ -1,0 +1,15 @@
+torch
+torchvision
+onnx
+onnxruntime
+optuna
+wandb
+fastapi
+uvicorn[standard]
+python-multipart
+Pillow
+numpy
+scikit-learn
+matplotlib
+scipy
+tqdm

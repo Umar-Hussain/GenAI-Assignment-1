@@ -1,0 +1,47 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+env/
+
+# Model checkpoints & exports
+*.pth
+*.pt
+*.onnx
+*.bin
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+models/onnx/*
+!models/onnx/.gitkeep
+
+# Datasets
+data/*
+!data/.gitkeep
+
+# Experiment tracking & logs
+wandb/
+mlruns/
+*.log
+
+# Node & Build artifacts
+node_modules/
+build/
+dist/
+.next/
+out/
+
+# Docker
+.docker/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
