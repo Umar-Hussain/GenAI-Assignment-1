@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class DenoisingAutoencoder(nn.Module):
-    def __init__(self, in_channels=3, base_channels=32, bottleneck_dim=256, dropout=0.2, **kwargs):
+    def __init__(self, in_channels=3, base_channels=32, bottleneck_dim=256, dropout=0.1, **kwargs):
         super().__init__()
         if in_channels > 3 and base_channels == 32:
             base_channels = in_channels
@@ -29,21 +29,11 @@ class DenoisingAutoencoder(nn.Module):
             nn.LeakyReLU(0.2, inplace=True)
         )
 
-        bot_channels = max(16, bottleneck_dim // 8)
         self.bottleneck = nn.Sequential(
-            nn.Conv2d(base_channels * 8, bot_channels, 1, bias=False),
-            nn.BatchNorm2d(bot_channels),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout2d(dropout),
-            nn.Conv2d(bot_channels, base_channels * 8, 1, bias=False),
+            nn.Conv2d(base_channels * 8, base_channels * 8, 3, 1, 1, bias=False),
             nn.BatchNorm2d(base_channels * 8),
-            nn.LeakyReLU(0.2, inplace=True)
-        )
-
-        self.skip_conv = nn.Sequential(
-            nn.Conv2d(base_channels, 8, 1, bias=False),
-            nn.BatchNorm2d(8),
-            nn.LeakyReLU(0.2, inplace=True)
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout2d(dropout)
         )
 
         self.dec4 = nn.Sequential(
@@ -52,17 +42,17 @@ class DenoisingAutoencoder(nn.Module):
             nn.ReLU(inplace=True)
         )
         self.dec3 = nn.Sequential(
-            nn.ConvTranspose2d(base_channels * 4, base_channels * 2, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(base_channels * 8, base_channels * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(base_channels * 2),
             nn.ReLU(inplace=True)
         )
         self.dec2 = nn.Sequential(
-            nn.ConvTranspose2d(base_channels * 2, base_channels, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(base_channels * 4, base_channels, 4, 2, 1, bias=False),
             nn.BatchNorm2d(base_channels),
             nn.ReLU(inplace=True)
         )
         self.dec1 = nn.Sequential(
-            nn.ConvTranspose2d(base_channels + 8, base_channels, 4, 2, 1, bias=False),
+            nn.ConvTranspose2d(base_channels * 2, base_channels, 4, 2, 1, bias=False),
             nn.BatchNorm2d(base_channels),
             nn.ReLU(inplace=True)
         )
@@ -72,19 +62,17 @@ class DenoisingAutoencoder(nn.Module):
         )
 
     def forward(self, x):
-        e1 = self.enc1(x)
-        e2 = self.enc2(e1)
-        e3 = self.enc3(e2)
-        e4 = self.enc4(e3)
+        e1 = self.enc1(x)                           # (B, 32, 64, 64)
+        e2 = self.enc2(e1)                          # (B, 64, 32, 32)
+        e3 = self.enc3(e2)                          # (B, 128, 16, 16)
+        e4 = self.enc4(e3)                          # (B, 256, 8, 8)
 
-        b = self.bottleneck(e4)
+        b = self.bottleneck(e4)                     # (B, 256, 8, 8)
 
-        d4 = self.dec4(b)
-        d3 = self.dec3(d4)
-        d2 = self.dec2(d3)
-        s1 = self.skip_conv(e1)
-        d1 = self.dec1(torch.cat([d2, s1], dim=1))
+        d4 = self.dec4(b)                           # (B, 128, 16, 16)
+        d3 = self.dec3(torch.cat([d4, e3], dim=1))  # (B, 64, 32, 32)
+        d2 = self.dec2(torch.cat([d3, e2], dim=1))  # (B, 32, 64, 64)
+        d1 = self.dec1(torch.cat([d2, e1], dim=1))  # (B, 32, 128, 128)
         return self.final(d1)
 
 UniversalAutoencoder = DenoisingAutoencoder
-
