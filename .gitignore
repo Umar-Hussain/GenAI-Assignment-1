@@ -45,3 +45,5 @@ out/
 .idea/
 .DS_Store
 Thumbs.db
+*.png
+assignment_text.txt
