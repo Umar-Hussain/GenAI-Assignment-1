@@ -79,10 +79,20 @@ def train_epoch(netG, netD, loader, optG, optD, criterionBCE, criterionL1, lambd
 
         # Train Generator
         optG.zero_grad()
-        pred_fake_g = netD(torch.cat((real_A, fake_B), dim=1), style)
+        fake_B_gen = netG(real_A, style)
+        pred_fake_g = netD(torch.cat((real_A, fake_B_gen), dim=1), style)
         loss_G_bce = criterionBCE(pred_fake_g, torch.ones_like(pred_fake_g))
-        loss_G_l1 = criterionL1(fake_B, real_B) * lambda_l1
-        loss_G = loss_G_bce + loss_G_l1
+
+        # Ink-weighted L1 loss: dark lines get 5x weight so features & contours are full and bold
+        ink_weight = 1.0 + 4.0 * torch.clamp((1.0 - real_B) * 0.5, 0.0, 1.0)
+        loss_G_l1 = (torch.abs(fake_B_gen - real_B) * ink_weight).mean() * lambda_l1
+
+        # Edge gradient loss for crisp line sharpness
+        fake_dx = torch.abs(fake_B_gen[:, :, :, 1:] - fake_B_gen[:, :, :, :-1])
+        real_dx = torch.abs(real_B[:, :, :, 1:] - real_B[:, :, :, :-1])
+        loss_G_grad = (fake_dx - real_dx).abs().mean() * 20.0
+
+        loss_G = loss_G_bce + loss_G_l1 + loss_G_grad
         loss_G.backward()
         optG.step()
         loss_G_meter.update(loss_G.item(), real_A.size(0))
