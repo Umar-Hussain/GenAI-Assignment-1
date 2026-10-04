@@ -36,14 +36,14 @@ This paper investigates the continuum between monolithic universal reconstructio
 
 \section{Task 1: Universal Denoising Autoencoder}
 \subsection{Architecture and Bottleneck Design}
-The Universal Autoencoder comprises a symmetrical convolutional encoder-decoder topology processing $128 \times 128 \times 3$ RGB representations. The encoder progressively compresses spatial dimensions across four downsampling stages with channel progression $3 \to C \to 2C \to 4C \to 8C$ ($C=32$). A dense bottleneck projects flattened features into a low-dimensional compressed subspace ($D=256$) subject to dropout regularization, precluding trivial identity mapping. The decoder mirrors this pathway via transpose convolutions terminated by a Sigmoid activation.
+The Universal Autoencoder comprises a symmetrical convolutional encoder-decoder U-Net topology processing $128 \times 128 \times 3$ RGB representations. The encoder progressively compresses spatial dimensions across four downsampling stages with channel progression $3 \to C \to 2C \to 4C \to 8C$ ($C=32$). A convolutional spatial bottleneck regularizes feature representations with 2D spatial dropout, precluding trivial identity mapping while preserving spatial topology. Multi-scale skip connections link corresponding encoder feature maps directly to decoder upsampling stages at $64\times 64$, $32\times 32$, and $16\times 16$ resolutions, enabling high-frequency texture and contour preservation without blurring. The decoder mirrors this pathway via transpose convolutions terminated by a Sigmoid activation.
 
 \subsection{Composite Loss Formulation}
 To preserve both pixel-accurate intensity and high-frequency structural contours, the network is optimized using a weighted linear combination of $\ell_1$ reconstruction loss and Structural Similarity Index Measure (SSIM):
 \begin{equation}
 \mathcal{L}_{\text{universal}} = \alpha \mathcal{L}_1(x, \hat{x}) + (1 - \alpha)(1 - \text{SSIM}(x, \hat{x}))
 \end{equation}
-where $\alpha \in [0, 1]$ balances low-frequency fidelity and edge sharpness. Hyperparameter exploration via Optuna converged on $\alpha = 0.82$, learning rate $\eta = 2.4 \times 10^{-4}$, and bottleneck dimension 256.
+where $\alpha \in [0, 1]$ balances low-frequency fidelity and edge sharpness. Hyperparameter exploration via Optuna converged on $\alpha = 0.82$, learning rate $\eta = 1.0 \times 10^{-3}$, and base channel capacity of 32.
 
 \section{Task 2: Hard-Routed Specialist Autoencoders}
 \subsection{Corruption Classification}
@@ -86,8 +86,9 @@ Task 4 synthesizes facial sketches from photographs using the FS2K benchmark. Th
 
 The discriminator implements a $70 \times 70$ PatchGAN assessing local structural realism on concatenated pairs $[x, y, e_s]$ under binary cross-entropy:
 \begin{equation}
-\mathcal{L}_G = \mathcal{L}_{\text{adv}}(G, D) + \lambda_{L1} \|y - G(x, s)\|_1
+\mathcal{L}_G = \mathcal{L}_{\text{adv}}(G, D) + \lambda_{L1} \mathcal{L}_{\text{ink-L1}} + \lambda_{\text{grad}} \mathcal{L}_{\text{edge}}
 \end{equation}
+To prevent washed-out sketches caused by the predominance of white background in sketch synthesis, we employ an ink-weighted $\ell_1$ loss giving $5\times$ penalty to dark pencil strokes alongside horizontal and vertical image gradient matching $\mathcal{L}_{\text{edge}}$, ensuring crisp, high-contrast facial contours.
 
 \section{Application Architecture and Deployment}
 The system is implemented as a unified full-stack application. The backend is written in FastAPI and uses ONNX Runtime with CPU graph optimizations for low-latency inference ($<25$ms). The frontend is developed with React and Tailwind CSS, providing dedicated interactive workspaces, an interactive before/after split slider, runtime corruption generators, and real-time telemetry monitors. The entire ecosystem is containerized via Docker and orchestrated with a single \texttt{docker-compose up} invocation.
