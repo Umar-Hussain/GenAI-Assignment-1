@@ -71,16 +71,53 @@ def objective(trial, args):
             
     return best_acc
 
+def train_model(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = CorruptionClassifier(3, 4, args.base_channels, args.dropout).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    criterion = nn.CrossEntropyLoss()
+    
+    train_loader = get_dataloader(args.data_dir, args.batch_size, split='train')
+    val_loader = get_dataloader(args.data_dir, args.batch_size, split='val')
+    
+    os.makedirs(args.ckpt_dir, exist_ok=True)
+    best_acc = 0.0
+    save_path = os.path.join(args.ckpt_dir, "classifier.pth")
+    
+    print(f"Training Corruption Classifier on {device} ({args.epochs} epochs)...")
+    for epoch in range(1, args.epochs + 1):
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, device)
+        val_loss, acc, p, r, f1, cm = validate(model, val_loader, criterion, device)
+        print(f"Epoch {epoch:02d}/{args.epochs:02d} | Train Loss: {train_loss:.4f} | Val Acc: {acc*100:.2f}% | F1: {f1:.4f}")
+        
+        if acc > best_acc:
+            best_acc = acc
+            torch.save(model.state_dict(), save_path)
+            print(f"  [+] Saved new best checkpoint -> {save_path} (Val Acc: {best_acc*100:.2f}%)")
+            
+    print(f"Corruption Classifier training completed. Best Val Acc: {best_acc*100:.2f}%")
+    return model
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str, required=True)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--n_trials", type=int, default=10)
+    parser.add_argument("--data_dir", type=str, default="data")
+    parser.add_argument("--ckpt_dir", type=str, default="models/checkpoints")
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--base_channels", type=int, default=32)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--weight_decay", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--run_optuna", action="store_true")
+    parser.add_argument("--n_trials", type=int, default=5)
     args = parser.parse_args()
         
-    study = optuna.create_study(direction="maximize")
-    study.optimize(lambda trial: objective(trial, args), n_trials=args.n_trials)
-    print("Best trial:", study.best_trial.params)
+    if args.run_optuna:
+        study = optuna.create_study(direction="maximize")
+        study.optimize(lambda trial: objective(trial, args), n_trials=args.n_trials)
+        print("Best trial:", study.best_trial.params)
+    else:
+        train_model(args)
 
 if __name__ == "__main__":
     main()

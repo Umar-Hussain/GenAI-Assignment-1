@@ -67,21 +67,53 @@ def objective(trial, args):
             
     return best_loss
 
+def train_model(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = UniversalAutoencoder(3, args.base_channels, args.bottleneck_dim, args.dropout).to(device)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    
+    train_loader = get_dataloader(args.data_dir, args.batch_size, split='train')
+    val_loader = get_dataloader(args.data_dir, args.batch_size, split='val')
+    
+    os.makedirs(args.ckpt_dir, exist_ok=True)
+    best_loss = float('inf')
+    save_path = os.path.join(args.ckpt_dir, "universal_ae.pth")
+    
+    print(f"Training Universal Autoencoder on {device} ({args.epochs} epochs, batch_size={args.batch_size})...")
+    for epoch in range(1, args.epochs + 1):
+        train_loss = train_epoch(model, train_loader, optimizer, args.alpha, device)
+        val_loss = validate(model, val_loader, args.alpha, device)
+        print(f"Epoch {epoch:02d}/{args.epochs:02d} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+        
+        if val_loss < best_loss:
+            best_loss = val_loss
+            torch.save(model.state_dict(), save_path)
+            print(f"  [+] Saved new best checkpoint -> {save_path} (Val Loss: {best_loss:.4f})")
+            
+    print(f"Universal Autoencoder training completed. Best Val Loss: {best_loss:.4f}")
+    return model
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", type=str, required=True)
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--n_trials", type=int, default=10)
-    parser.add_argument("--use_wandb", action="store_true")
+    parser.add_argument("--data_dir", type=str, default="data")
+    parser.add_argument("--ckpt_dir", type=str, default="models/checkpoints")
+    parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--base_channels", type=int, default=32)
+    parser.add_argument("--bottleneck_dim", type=int, default=256)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--alpha", type=float, default=0.82)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--run_optuna", action="store_true")
+    parser.add_argument("--n_trials", type=int, default=5)
     args = parser.parse_args()
     
-    if args.use_wandb:
-        import wandb
-        wandb.init(project="universal_autoencoder")
-        
-    study = optuna.create_study(direction="minimize")
-    study.optimize(lambda trial: objective(trial, args), n_trials=args.n_trials)
-    print("Best trial:", study.best_trial.params)
+    if args.run_optuna:
+        study = optuna.create_study(direction="minimize")
+        study.optimize(lambda trial: objective(trial, args), n_trials=args.n_trials)
+        print("Best trial:", study.best_trial.params)
+    else:
+        train_model(args)
 
 if __name__ == "__main__":
     main()
