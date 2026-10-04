@@ -56,12 +56,12 @@ def health_check():
 @app.post("/api/universal-restore")
 async def universal_restore(file: UploadFile = File(...)):
     image_bytes = await file.read()
-    input_array = preprocess_image(image_bytes, to_tanh=False)
+    input_array, orig_size = preprocess_image(image_bytes, to_tanh=False)
     
     session = get_model("universal_ae.onnx")
     outputs, inference_time = run_inference(session, input_array)
     
-    restored_img = postprocess_image(outputs[0])
+    restored_img = postprocess_image(outputs[0], target_size=orig_size)
     return {
         "restored_image": encode_image(restored_img),
         "inference_time_ms": round(inference_time, 2)
@@ -70,7 +70,7 @@ async def universal_restore(file: UploadFile = File(...)):
 @app.post("/api/hard-route")
 async def hard_route(file: UploadFile = File(...)):
     image_bytes = await file.read()
-    input_array = preprocess_image(image_bytes, to_tanh=False)
+    input_array, orig_size = preprocess_image(image_bytes, to_tanh=False)
     
     classifier_session = get_model("classifier.onnx")
     cls_outputs, cls_time = run_inference(classifier_session, input_array)
@@ -88,7 +88,9 @@ async def hard_route(file: UploadFile = File(...)):
     }
 
     if expert_idx == 0:
-        clean_img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((128, 128))
+        clean_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        target_dim = (max(256, min(clean_img.size[0], 512)), max(256, min(clean_img.size[1], 512)))
+        clean_img = clean_img.resize(target_dim, Image.Resampling.LANCZOS)
         return {
             "restored_image": encode_image(clean_img),
             "classifier_probs": probs,
@@ -101,7 +103,7 @@ async def hard_route(file: UploadFile = File(...)):
     expert_session = get_model(expert_file)
     exp_outputs, exp_time = run_inference(expert_session, input_array)
     
-    restored_img = postprocess_image(exp_outputs[0])
+    restored_img = postprocess_image(exp_outputs[0], target_size=orig_size)
     return {
         "restored_image": encode_image(restored_img),
         "classifier_probs": probs,
@@ -113,12 +115,12 @@ async def hard_route(file: UploadFile = File(...)):
 @app.post("/api/soft-moe")
 async def soft_moe(file: UploadFile = File(...)):
     image_bytes = await file.read()
-    input_array = preprocess_image(image_bytes, to_tanh=False)
+    input_array, orig_size = preprocess_image(image_bytes, to_tanh=False)
     
     session = get_model("soft_moe.onnx")
     outputs, inference_time = run_inference(session, input_array)
     
-    restored_img = postprocess_image(outputs[0])
+    restored_img = postprocess_image(outputs[0], target_size=orig_size)
     
     if len(outputs) > 1:
         weights = outputs[1][0].tolist()
@@ -134,7 +136,7 @@ async def soft_moe(file: UploadFile = File(...)):
 @app.post("/api/face-to-sketch")
 async def face_to_sketch(file: UploadFile = File(...), style: int = Form(1)):
     image_bytes = await file.read()
-    input_array = preprocess_image(image_bytes, to_tanh=True)
+    input_array, orig_size = preprocess_image(image_bytes, to_tanh=True)
     
     style_idx = np.array([max(0, min(2, style - 1))], dtype=np.int64)
     session = get_model("generator.onnx")
@@ -145,7 +147,7 @@ async def face_to_sketch(file: UploadFile = File(...), style: int = Form(1)):
     }
     outputs, inference_time = run_inference(session, inputs)
     
-    sketch_img = postprocess_image(outputs[0])
+    sketch_img = postprocess_image(outputs[0], target_size=orig_size, is_sketch=True)
     return {
         "sketch_image": encode_image(sketch_img),
         "style_selected": style,
@@ -155,7 +157,10 @@ async def face_to_sketch(file: UploadFile = File(...), style: int = Form(1)):
 @app.post("/api/corrupt")
 async def corrupt_image(file: UploadFile = File(...), corruption_type: str = Form(...), params: str = Form("{}")):
     image_bytes = await file.read()
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB").resize((128, 128))
+    orig_img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    orig_size = orig_img.size
+    
+    img = orig_img.resize((128, 128), Image.Resampling.BILINEAR)
     p = json.loads(params) if params else {}
 
     if corruption_type == "clean":
@@ -188,7 +193,10 @@ async def corrupt_image(file: UploadFile = File(...), corruption_type: str = For
             arr[y:y+rh, x:x+rw] = [0, 0, 0]
         img = Image.fromarray(arr)
 
+    target_dim = (max(256, min(orig_size[0], 512)), max(256, min(orig_size[1], 512)))
+    img_display = img.resize(target_dim, Image.Resampling.LANCZOS)
+
     return {
-        "corrupted_image": encode_image(img),
+        "corrupted_image": encode_image(img_display),
         "corruption_type": corruption_type
     }
